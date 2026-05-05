@@ -16,7 +16,9 @@
   },
   "channels": {
     "telegram": {
-      "streaming": "off"
+      "streaming": {
+        "mode": "off"
+      }
     }
   },
   "messages": {

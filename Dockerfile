@@ -5,6 +5,8 @@
 
 FROM node:22-bookworm
 
+ARG OPENCLAW_VERSION=2026.4.29
+
 # Install minimal runtime dependencies
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -14,8 +16,12 @@ RUN apt-get update \
     procps \
   && rm -rf /var/lib/apt/lists/*
 
-# Install OpenClaw globally (always latest — busts cache via Railway redeploy)
-RUN npm install -g openclaw@latest
+# Install the pinned OpenClaw runtime. Version bumps must go through the
+# validation pipeline. Bun global installs currently place the binary outside
+# this image's runtime PATH and block OpenClaw postinstalls, so the runtime
+# package install stays on npm until OpenClaw supports Bun global installs here.
+RUN npm install -g "openclaw@${OPENCLAW_VERSION}" \
+  && openclaw --version
 
 # Create non-root user
 RUN groupadd -g 1001 openclaw \

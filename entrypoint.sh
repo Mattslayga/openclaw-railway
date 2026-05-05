@@ -814,7 +814,7 @@ if [ -f "$CONFIG_FILE" ]; then
   (
     sleep 30  # Grace period for gateway to fully boot
     while true; do
-      if ! pidof openclaw-gateway >/dev/null 2>&1; then
+      if ! pgrep -f "openclaw gateway run|openclaw-gateway" >/dev/null 2>&1; then
         echo "[entrypoint] Watchdog: gateway process gone — exiting container so Railway respawns"
         kill -TERM 1 2>/dev/null
         sleep 5

@@ -6,6 +6,9 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "openclaw:validate:local": "bash scripts/validate-openclaw-local.sh",
+    "openclaw:validate:railway": "bash scripts/validate-openclaw-railway.sh",
+    "openclaw:promote": "bash scripts/promote-openclaw-version.sh"
   }
 }

@@ -27,6 +27,8 @@ Thumbs.db
 
 # Test results (generated, not shipped)
 tests/results/
+.validation/
+.fallow/
 
 # Local dev config
 CLAUDE.md
