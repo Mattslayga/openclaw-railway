@@ -514,6 +514,16 @@ if [ -f "$CONFIG_FILE" ]; then
   echo "[entrypoint] Config set to 640 root:openclaw (read-only for gateway, no agent write)"
 fi
 
+# Validate the fully generated config after overlay merge and hardening, before
+# starting the gateway. This catches upstream schema changes and operator overlay
+# drift with a clear entrypoint error instead of a gateway startup loop.
+if ! su openclaw -c "HOME=/home/openclaw OPENCLAW_STATE_DIR=/data/.openclaw OPENCLAW_CONFIG_PATH=$CONFIG_FILE openclaw config validate --json"; then
+  echo "[entrypoint] ERROR: generated OpenClaw config failed schema validation"
+  exit 1
+fi
+
+echo "[entrypoint] Config schema validation: OK"
+
 # Note: exec-approvals permissions already set in step 3 (single pass).
 # Accepted tradeoff: 660 means the agent's write tool could modify exec-approvals
 # to expand the allowlist, but the tool policy in openclaw.json (which IS locked

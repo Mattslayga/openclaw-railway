@@ -112,6 +112,11 @@ docker run -d \
   -e OPENROUTER_API_KEY="validation-openrouter-key" \
   -e LLM_PRIMARY_MODEL="openrouter/openai/gpt-4o-mini" \
   -e SECURITY_TIER="0" \
+  -e DISCORD_BOT_TOKEN="dummy-discord-token" \
+  -e DISCORD_OWNER_ID="111111111111111111" \
+  -e DISCORD_GUILD_ID="222222222222222222" \
+  -e DISCORD_GUILD_CHANNELS="333333333333333333,444444444444444444" \
+  -e DISCORD_MENTION_NOT_REQUIRED_CHANNELS="444444444444444444" \
   "$IMAGE_TAG" >/dev/null || fail "container failed to start"
 
 HEALTH_URL=""
@@ -139,6 +144,7 @@ fi
 
 echo "[validate-local] Inspecting generated config and permissions"
 docker exec "$CONTAINER_NAME" test -f /data/.openclaw/openclaw.json || fail "config file missing"
+docker exec "$CONTAINER_NAME" su openclaw -c "HOME=/home/openclaw OPENCLAW_STATE_DIR=/data/.openclaw OPENCLAW_CONFIG_PATH=/data/.openclaw/openclaw.json openclaw config validate --json" >"${ARTIFACT_DIR}/config-validate.json" 2>&1 || fail "openclaw config schema validation failed"
 CONFIG_MODE="$(docker exec "$CONTAINER_NAME" stat -c '%U:%G %a' /data/.openclaw/openclaw.json 2>/dev/null || true)"
 if [[ "$CONFIG_MODE" != "root:openclaw 640" ]]; then
   echo "$CONFIG_MODE" > "${ARTIFACT_DIR}/config-mode.txt"
@@ -150,6 +156,11 @@ const fs = require('fs');
 const config = JSON.parse(fs.readFileSync('/data/.openclaw/openclaw.json', 'utf8'));
 if (config.tools?.exec?.security !== 'allowlist') throw new Error('Tier 0 exec security is not allowlist');
 if (!config.tools?.fs?.workspaceOnly) throw new Error('workspaceOnly fs policy is not enabled');
+const guild = config.channels?.discord?.guilds?.['222222222222222222'];
+if (!guild) throw new Error('Discord guild config was not generated');
+if (!guild.channels?.['333333333333333333'] || typeof guild.channels['333333333333333333'] !== 'object') throw new Error('Discord allowlisted channel entry was not generated');
+if (guild.channels?.['333333333333333333']?.allow !== undefined) throw new Error('Discord channel config contains invalid legacy allow property');
+if (guild.channels?.['444444444444444444']?.requireMention !== false) throw new Error('Discord mention opt-out channel missing requireMention=false');
 " || fail "security config assertions failed"
 
 echo "[validate-local] Scanning logs for blocker patterns"
@@ -175,7 +186,8 @@ write_summary "pass" "all local Docker gates passed"
   echo "- container boots"
   echo "- /healthz passes"
   echo "- config exists with root:openclaw 640"
-  echo "- Tier 0 exec allowlist and workspaceOnly assertions pass"
+  echo "- OpenClaw config schema validation passes"
+  echo "- Tier 0 exec allowlist, workspaceOnly, and Discord guild config assertions pass"
   echo "- blocker log scan passes"
 } > "$REPORT_MD"
 

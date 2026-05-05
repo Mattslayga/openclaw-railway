@@ -30,6 +30,25 @@ EOF
   exit 1
 fi
 
+LINKED_STATUS_JSON="$(mktemp)"
+railway status --json > "$LINKED_STATUS_JSON"
+node - "$LINKED_STATUS_JSON" "${OPENCLAW_RAILWAY_PROJECT_ID:-}" <<'NODE'
+const fs = require('fs');
+const [path, expectedProjectId] = process.argv.slice(2);
+const status = JSON.parse(fs.readFileSync(path, 'utf8'));
+const envs = status.environments?.edges?.map(e => e.node?.name).filter(Boolean) ?? [];
+if (expectedProjectId && status.id !== expectedProjectId) {
+  console.error(`ERROR: linked Railway project is ${status.name} (${status.id}), expected ${expectedProjectId}.`);
+  console.error('Run: railway project link --project <id> --environment staging --service <staging-service>');
+  process.exit(1);
+}
+if (!envs.includes('staging')) {
+  console.error(`ERROR: linked Railway project ${status.name} has no staging environment.`);
+  process.exit(1);
+}
+NODE
+rm -f "$LINKED_STATUS_JSON"
+
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
 SAFE_VERSION="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._-' '_')"
 ARTIFACT_DIR=".validation/openclaw/${SAFE_VERSION}/${RUN_ID}-railway"
