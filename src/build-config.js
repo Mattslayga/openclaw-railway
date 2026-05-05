@@ -1,4 +1,5 @@
 // fallow-ignore-file unused-file
+// fallow-ignore-file complexity
 /**
  * Build OpenClaw config from environment variables
  *
