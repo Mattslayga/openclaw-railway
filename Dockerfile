@@ -5,7 +5,7 @@
 
 FROM node:22-bookworm
 
-ARG OPENCLAW_VERSION=2026.4.29
+ARG OPENCLAW_VERSION=2026.5.3-1
 
 # Install minimal runtime dependencies
 RUN apt-get update \

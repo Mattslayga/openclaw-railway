@@ -36,12 +36,20 @@ CURRENT="$(node -e "const fs=require('fs'); console.log(JSON.parse(fs.readFileSy
 
 node - "$VERSION" <<'NODE'
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 const version = process.argv[2];
 const path = '.openclaw-version.json';
 const data = JSON.parse(fs.readFileSync(path, 'utf8'));
 const previous = data.version;
+let latest = '';
+try {
+  const raw = execFileSync('bun', ['pm', 'view', 'openclaw', 'dist-tags', '--json'], { encoding: 'utf8' });
+  latest = JSON.parse(raw).latest || '';
+} catch {
+  latest = '';
+}
 data.version = version;
-data.channel = version.includes('-') ? 'prerelease' : 'stable';
+data.channel = version === latest || !version.includes('-') ? 'stable' : 'prerelease';
 data.promotedAt = new Date().toISOString().slice(0, 10);
 data.validatedBy = 'local-docker+railway-staging';
 data.notes = `Promoted after local Docker and Railway staging validation. Previous version: ${previous}.`;
