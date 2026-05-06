@@ -1,7 +1,7 @@
 {
-  "version": "2026.5.3-1",
+  "version": "2026.5.5",
   "channel": "stable",
-  "promotedAt": "2026-05-05",
+  "promotedAt": "2026-05-06",
   "validatedBy": "local-docker+railway-staging",
-  "notes": "Promoted after local Docker and Railway staging validation. Previous version: 2026.4.29."
+  "notes": "Promoted after local Docker and Railway staging validation. Previous version: 2026.5.3-1."
 }
