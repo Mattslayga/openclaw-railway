@@ -60,7 +60,7 @@ The agent's `read`, `write`, and `edit` tools are restricted to the workspace di
 This blocks:
 - Reading `/proc/self/environ` (API keys, tokens)
 - Reading `/data/.openclaw/openclaw.json` (config with secrets)
-- Writing to `/home/openclaw/.openclaw/exec-approvals.json` (exec policy)
+- Writing to either exec approvals file through agent filesystem tools (exec policy)
 - Any file access outside `/data/workspace/`
 
 #### 2. Linux File Permissions (defense in depth)
@@ -70,9 +70,10 @@ The entrypoint also hardens file ownership as a second layer. Even if `workspace
 | Path | Owner | Perms | Purpose |
 |------|-------|-------|---------|
 | `/data/.openclaw/openclaw.json` | root:openclaw | 640 | Config — gateway reads, agent can't write |
-| `/data/.openclaw/` directory | root:openclaw | 750 | Agent can't create new files |
+| `/data/.openclaw/` directory | root:openclaw | 1770 | Runtime can atomically update state; sticky bit protects root-owned config |
 | `/home/openclaw/.openclaw/` | root:openclaw | 750 | Agent can't create new files |
-| `exec-approvals.json` | root:openclaw | 660 | Gateway needs write for metadata |
+| `/data/.openclaw/exec-approvals.json` | openclaw:openclaw | 600 | Current runtime atomically updates approvals metadata |
+| `/home/openclaw/.openclaw/exec-approvals.json` | root:openclaw | 660 | Compatibility path for older pinned runtimes |
 | `/data/workspace/AGENTS.md` etc. | root:openclaw | 440 | Shipped templates — read-only |
 | `/data/workspace/MEMORY.md` etc. | openclaw:openclaw | 644 | User files — read/write |
 

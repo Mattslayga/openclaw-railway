@@ -239,8 +239,10 @@ The entrypoint hardens file ownership as a backup layer:
 | What's protected | How |
 |-----------------|-----|
 | `openclaw.json` (config) | `root:openclaw 640` — agent cannot write |
-| `.openclaw/` directories | `root:openclaw 750` — agent cannot create new files |
-| `exec-approvals.json` | `root:openclaw 660` — gateway needs write for metadata |
+| `/data/.openclaw/` | `root:openclaw 1770` — sticky bit protects root-owned config while the runtime atomically updates state |
+| `/home/openclaw/.openclaw/` | `root:openclaw 750` — legacy approvals directory is not writable |
+| `/data/.openclaw/exec-approvals.json` | `openclaw:openclaw 600` — current runtime updates approvals atomically |
+| `/home/openclaw/.openclaw/exec-approvals.json` | `root:openclaw 660` — compatibility path for older runtimes |
 | Behavioral templates | `root:openclaw 440` — restored from image on every startup |
 | Non-essential env vars | Scrubbed from environment after config generation |
 

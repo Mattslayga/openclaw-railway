@@ -29,10 +29,23 @@ CONTAINER_NAME="openclaw-railway-validate-${SAFE_VERSION}-${RUN_ID}"
 LOG_FILE="${ARTIFACT_DIR}/container.log"
 SUMMARY_JSON="${ARTIFACT_DIR}/summary.json"
 REPORT_MD="${ARTIFACT_DIR}/report.md"
+CONTEXT_JSON="${ARTIFACT_DIR}/context.json"
 
 mkdir -p "$ARTIFACT_DIR"
+node scripts/lib/release-sentinel-contract.js context "$ROOT_DIR" > "$CONTEXT_JSON"
 
 finish() {
+  local exit_code=$?
+  if [[ "$exit_code" -ne 0 && ! -f "$SUMMARY_JSON" ]]; then
+    write_summary "fail" "validation exited unexpectedly with status ${exit_code}"
+    cat > "$REPORT_MD" <<EOF
+# OpenClaw Local Validation: ${VERSION}
+
+Status: FAIL
+Reason: validation exited unexpectedly with status ${exit_code}
+Evidence context: ${CONTEXT_JSON}
+EOF
+  fi
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 }
 trap finish EXIT
@@ -40,15 +53,17 @@ trap finish EXIT
 write_summary() {
   local status="$1"
   local reason="$2"
-  node - "$SUMMARY_JSON" "$VERSION" "$status" "$reason" "$RUN_ID" <<'NODE'
+  node - "$SUMMARY_JSON" "$CONTEXT_JSON" "$VERSION" "$status" "$reason" "$RUN_ID" <<'NODE'
 const fs = require('fs');
-const [path, version, status, reason, runId] = process.argv.slice(2);
+const [path, contextPath, version, status, reason, runId] = process.argv.slice(2);
+const context = JSON.parse(fs.readFileSync(contextPath, 'utf8'));
 fs.writeFileSync(path, JSON.stringify({
   target: 'local-docker',
   version,
   status,
   reason,
   runId,
+  ...context,
   generatedAt: new Date().toISOString(),
 }, null, 2) + '\n');
 NODE
@@ -76,6 +91,7 @@ fail() {
     echo "Artifacts:"
     echo "- ${LOG_FILE}"
     echo "- ${SUMMARY_JSON}"
+    echo "- ${CONTEXT_JSON}"
     echo "- ${ARTIFACT_DIR}/stability/"
   } > "$REPORT_MD"
   echo "FAIL: $reason"
@@ -121,7 +137,9 @@ docker run -d \
   "$IMAGE_TAG" >/dev/null || fail "container failed to start"
 
 HEALTH_URL=""
-for _ in $(seq 1 45); do
+# Match Railway's cold-start allowance. Candidate CLI/plugin initialization can
+# take several minutes on a fresh volume, especially under emulated local Docker.
+for _ in $(seq 1 300); do
   docker logs "$CONTAINER_NAME" >"$LOG_FILE" 2>&1 || true
   HOST_PORT="$(docker port "$CONTAINER_NAME" 8080/tcp 2>/dev/null | sed 's/.*://g' | head -1 || true)"
   if [[ -n "$HOST_PORT" ]]; then
@@ -152,6 +170,37 @@ if [[ "$CONFIG_MODE" != "root:openclaw 640" ]]; then
   fail "config permissions changed"
 fi
 
+STATE_DIR_MODE="$(docker exec "$CONTAINER_NAME" stat -c '%U:%G %a' /data/.openclaw 2>/dev/null || true)"
+if [[ "$STATE_DIR_MODE" != "root:openclaw 1770" ]]; then
+  echo "$STATE_DIR_MODE" > "${ARTIFACT_DIR}/state-dir-mode.txt"
+  fail "state directory permissions changed"
+fi
+
+APPROVALS_MODE="$(docker exec "$CONTAINER_NAME" stat -c '%U:%G %a' /data/.openclaw/exec-approvals.json 2>/dev/null || true)"
+if [[ "$APPROVALS_MODE" != "openclaw:openclaw 600" ]]; then
+  echo "$APPROVALS_MODE" > "${ARTIFACT_DIR}/exec-approvals-mode.txt"
+  fail "state-dir exec approvals permissions changed"
+fi
+
+if docker exec "$CONTAINER_NAME" su openclaw -c "rm /data/.openclaw/openclaw.json" >/dev/null 2>&1; then
+  fail "openclaw user could remove root-owned config"
+fi
+
+echo "[validate-local] Verifying Discord plugin discovery"
+docker exec "$CONTAINER_NAME" timeout 300 su openclaw -c \
+  "HOME=/home/openclaw OPENCLAW_STATE_DIR=/data/.openclaw OPENCLAW_CONFIG_PATH=/data/.openclaw/openclaw.json openclaw plugins list --json" \
+  >"${ARTIFACT_DIR}/plugins-list.json" 2>&1 || fail "Discord plugin discovery command failed"
+EXPECTED_DISCORD_VERSION="$(printf '%s' "$VERSION" | sed -E 's/-[0-9]+$//')"
+node - "${ARTIFACT_DIR}/plugins-list.json" "$EXPECTED_DISCORD_VERSION" <<'NODE' || fail "Discord plugin is not enabled, loaded, and version-aligned"
+const fs = require('fs');
+const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const expectedVersion = process.argv[3];
+const discord = payload.plugins?.find((plugin) => plugin.id === 'discord');
+if (!discord || discord.enabled !== true || discord.status !== 'loaded') process.exit(1);
+if (discord.version !== expectedVersion) process.exit(1);
+if (discord.dependencyStatus?.requiredInstalled !== true) process.exit(1);
+NODE
+
 docker exec "$CONTAINER_NAME" node -e "
 const fs = require('fs');
 const config = JSON.parse(fs.readFileSync('/data/.openclaw/openclaw.json', 'utf8'));
@@ -162,6 +211,7 @@ if (!guild) throw new Error('Discord guild config was not generated');
 if (!guild.channels?.['333333333333333333'] || typeof guild.channels['333333333333333333'] !== 'object') throw new Error('Discord allowlisted channel entry was not generated');
 if (guild.channels?.['333333333333333333']?.allow !== undefined) throw new Error('Discord channel config contains invalid legacy allow property');
 if (guild.channels?.['444444444444444444']?.requireMention !== false) throw new Error('Discord mention opt-out channel missing requireMention=false');
+if (!config.plugins?.allow?.includes('discord')) throw new Error('Discord plugin trust allowlist was not generated');
 if (config.tools?.web?.search?.provider === 'brave') throw new Error('Brave web_search provider should not be configured when unavailable');
 " || fail "security config assertions failed"
 
@@ -180,6 +230,7 @@ write_summary "pass" "all local Docker gates passed"
   echo "Run: ${RUN_ID}"
   echo "Image: ${IMAGE_TAG}"
   echo "Health URL: ${HEALTH_URL}"
+  echo "Evidence context: ${CONTEXT_JSON}"
   echo
   echo "Gates:"
   echo "- npm package exists"
@@ -188,6 +239,9 @@ write_summary "pass" "all local Docker gates passed"
   echo "- container boots"
   echo "- /healthz passes"
   echo "- config exists with root:openclaw 640"
+  echo "- state dir is root:openclaw 1770 and sticky-bit protects root-owned config"
+  echo "- state-dir exec approvals are openclaw:openclaw 600 for atomic updates"
+  echo "- Discord plugin is explicitly trusted, enabled, loaded, and dependency-complete"
   echo "- OpenClaw config schema validation passes"
   echo "- Tier 0 exec allowlist, workspaceOnly, and Discord guild config assertions pass"
   echo "- blocker log scan passes"

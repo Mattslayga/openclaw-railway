@@ -4,6 +4,9 @@ This repository pins OpenClaw intentionally. Do not update the runtime by hand i
 
 This document is agent-harness agnostic: any human or automation system can follow it.
 
+The authority ladder and evidence identity contract are documented in
+[`OPENCLAW-RELEASE-AUTONOMY.md`](OPENCLAW-RELEASE-AUTONOMY.md).
+
 ## Non-negotiables
 
 - Never run `openclaw update` inside the Railway container.
@@ -11,6 +14,8 @@ This document is agent-harness agnostic: any human or automation system can foll
 - Promote from evidence, not optimism: local Docker + Railway staging must pass.
 - Any config-schema, permission, plugin, channel, provider, or secret-handling warning blocks promotion until understood.
 - Use a PR or explicit review checkpoint for the version bump.
+- Reject validation artifacts that do not match the current commit and workspace fingerprint.
+- Treat a complete `BLOCK` report and repair packet as a successful observer run.
 - After production passes, tag the known-good template state.
 
 ## Standard upgrade flow
@@ -83,6 +88,17 @@ Discord gate:
 - Discord account is configured, running, and connected.
 - every configured Discord guild/channel is visible to the bot.
 - send at least one Discord smoke message to a staging channel.
+
+After observing the response, record commit-bound evidence:
+
+```bash
+OPENCLAW_STAGING_CHANNEL_SMOKE_CONFIRMED=1 \
+OPENCLAW_STAGING_CHANNEL_SMOKE_EVIDENCE="Discord staging message and response observed" \
+bun run openclaw:record:channel-smoke -- <version> pass
+```
+
+If no channels are configured for this template lane, use `not_in_scope` and
+state the reason in `OPENCLAW_STAGING_CHANNEL_SMOKE_EVIDENCE`.
 
 ### 5. Promote the version pin
 

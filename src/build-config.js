@@ -416,6 +416,7 @@ function buildConfig() {
   // --- Discord ---
   if (process.env.DISCORD_BOT_TOKEN) {
     config.plugins = config.plugins || {};
+    config.plugins.allow = Array.from(new Set([...(config.plugins.allow || []), 'discord']));
     config.plugins.entries = config.plugins.entries || {};
     config.plugins.entries.discord = { enabled: true };
 

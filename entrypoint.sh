@@ -318,9 +318,12 @@ echo "[entrypoint] Behavioral templates locked (root:openclaw 440)"
 #    Tier 0: ls only, ask off
 #    Tier 1: curated list (find, git, wc, sort, uniq), ask off
 #    Tier 2+: full exec, no allowlist needed
-#    Note: exec-approvals.json lives at ~/.openclaw/ (user home), NOT $OPENCLAW_STATE_DIR
+#    OpenClaw <=2026.5 reads ~/.openclaw; 2026.7+ reads $OPENCLAW_STATE_DIR.
+#    Deploy both during the compatibility window so upgrades do not need the
+#    runtime's legacy-file migration (which cannot archive our root-owned file).
 # -----------------------------------------------------------------------------
 APPROVALS_HOME="/home/openclaw/.openclaw/exec-approvals.json"
+APPROVALS_STATE="/data/.openclaw/exec-approvals.json"
 
 mkdir -p /home/openclaw/.openclaw
 
@@ -336,8 +339,8 @@ case "$SECURITY_TIER" in
   *)
     APPROVALS_SRC=""
     echo "[entrypoint] Tier ${SECURITY_TIER}: full exec mode, no exec-approvals needed"
-    # Remove stale approvals file if upgrading from a lower tier
-    rm -f "$APPROVALS_HOME"
+    # Remove stale approvals files if upgrading from a lower tier
+    rm -f "$APPROVALS_HOME" "$APPROVALS_STATE"
     ;;
 esac
 
@@ -372,18 +375,16 @@ if [ -n "$EXEC_EXTRA_COMMANDS" ] && [ -f "$APPROVALS_HOME" ]; then
   done
 fi
 
+# Keep the state-dir copy byte-for-byte aligned after custom commands are added.
+if [ -f "$APPROVALS_HOME" ]; then
+  cp "$APPROVALS_HOME" "$APPROVALS_STATE"
+fi
+
 # Harden exec-approvals permissions (tier-aware):
-#   File: root:openclaw 660 — root owns, gateway (openclaw group) can read+write
-#     (gateway updates lastUsedCommand metadata at runtime on each exec call)
-#   Dir permissions differ by tier:
-#     Tier 0-1: 750 — gateway can traverse+read, cannot create new files
-#               (exec-approvals.json already deployed by entrypoint above)
-#     Tier 2+:  770 — gateway needs to create exec-approvals.json at runtime
-#               (we deleted it at line 310 since full exec doesn't use allowlists,
-#                but the gateway still creates it for internal state tracking)
-# Always harden the directory, regardless of whether exec-approvals file exists.
-# Tier 0-1: 750 — gateway can traverse+read but not create files (entrypoint deploys the file).
-# Tier 2+:  770 — gateway must create exec-approvals.json at runtime for internal state tracking.
+#   Legacy file: root:openclaw 660 — OpenClaw <=2026.5 updates it in place.
+#   State file: openclaw:openclaw 600 — OpenClaw 2026.7+ atomically replaces it.
+#   The legacy home directory remains 750 at Tier 0-1 and 770 at Tier 2+.
+#   The state directory is hardened separately after config generation.
 #   v2026.3.23+ made this mandatory: EACCES on the approvals file now blocks all exec calls.
 #   At Tier 2 exec is already unrestricted, so group-write on this dir doesn't weaken security.
 chown root:openclaw /home/openclaw/.openclaw
@@ -396,7 +397,9 @@ fi
 if [ -f "$APPROVALS_HOME" ]; then
   chown root:openclaw "$APPROVALS_HOME"
   chmod 660 "$APPROVALS_HOME"
-  echo "[entrypoint] Exec-approvals hardened (root:openclaw 660, dir 750)"
+  chown openclaw:openclaw "$APPROVALS_STATE"
+  chmod 600 "$APPROVALS_STATE"
+  echo "[entrypoint] Exec-approvals deployed for legacy and state-dir runtimes"
 fi
 
 # -----------------------------------------------------------------------------
@@ -494,14 +497,29 @@ if [ -n "${DISCORD_BOT_TOKEN:-}" ]; then
   chown openclaw:openclaw "$CONFIG_FILE"
   chmod 600 "$CONFIG_FILE"
 
-  if [ ! -d /data/.openclaw/npm/node_modules/@openclaw/discord ]; then
-    echo "[entrypoint] Discord configured; installing external plugin @openclaw/discord..."
-    if ! su openclaw -c "HOME=/home/openclaw OPENCLAW_STATE_DIR=/data/.openclaw OPENCLAW_CONFIG_PATH=$CONFIG_FILE openclaw plugins install @openclaw/discord --pin"; then
+  OPENCLAW_RUNTIME_VERSION="$(openclaw --version | sed -nE 's/^OpenClaw ([^ ]+).*/\1/p')"
+  DISCORD_PLUGIN_VERSION="$(printf '%s' "$OPENCLAW_RUNTIME_VERSION" | sed -E 's/-[0-9]+$//')"
+  if ! printf '%s' "$DISCORD_PLUGIN_VERSION" | grep -qE '^[0-9]{4}\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$'; then
+    echo "[entrypoint] ERROR: could not derive a safe Discord plugin version from OpenClaw ${OPENCLAW_RUNTIME_VERSION}"
+    exit 1
+  fi
+
+  DISCORD_PACKAGE_JSON="$(find /data/.openclaw/npm -path '*/node_modules/@openclaw/discord/package.json' -print -quit 2>/dev/null || true)"
+  INSTALLED_DISCORD_VERSION=""
+  if [ -n "$DISCORD_PACKAGE_JSON" ]; then
+    INSTALLED_DISCORD_VERSION="$(node -p "require('$DISCORD_PACKAGE_JSON').version" 2>/dev/null || true)"
+  fi
+
+  if [ "$INSTALLED_DISCORD_VERSION" != "$DISCORD_PLUGIN_VERSION" ]; then
+    echo "[entrypoint] Discord configured; installing @openclaw/discord@${DISCORD_PLUGIN_VERSION}..."
+    DISCORD_INSTALL_FORCE=""
+    [ -n "$INSTALLED_DISCORD_VERSION" ] && DISCORD_INSTALL_FORCE="--force"
+    if ! su openclaw -c "HOME=/home/openclaw OPENCLAW_STATE_DIR=/data/.openclaw OPENCLAW_CONFIG_PATH=$CONFIG_FILE openclaw plugins install @openclaw/discord@${DISCORD_PLUGIN_VERSION} --pin ${DISCORD_INSTALL_FORCE}"; then
       echo "[entrypoint] ERROR: failed to install @openclaw/discord"
       exit 1
     fi
   else
-    echo "[entrypoint] Discord external plugin already installed"
+    echo "[entrypoint] Discord external plugin already installed (${INSTALLED_DISCORD_VERSION})"
   fi
 fi
 
@@ -532,11 +550,14 @@ if [ -f "$CONFIG_FILE" ]; then
   done
   echo "[entrypoint] Gateway runtime directories created (${GATEWAY_DIRS})"
 
-  # Lock the .openclaw directory — openclaw can traverse and read, not create files
+  # OpenClaw 2026.7+ saves exec approvals atomically via temp-file + rename, so
+  # the runtime needs directory write access. The sticky bit prevents openclaw
+  # from replacing root-owned files such as openclaw.json while still allowing
+  # it to replace its own exec-approvals.json.
   chown root:openclaw /data/.openclaw
-  chmod 750 /data/.openclaw
+  chmod 1770 /data/.openclaw
 
-  echo "[entrypoint] Config set to 640 root:openclaw (read-only for gateway, no agent write)"
+  echo "[entrypoint] Config set to 640 root:openclaw; state dir protected by sticky bit"
 fi
 
 # Validate the fully generated config after overlay merge and hardening, before

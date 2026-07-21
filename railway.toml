@@ -3,7 +3,9 @@ builder = "dockerfile"
 
 [deploy]
 healthcheckPath = "/healthz"
-healthcheckTimeout = 30
+# A fresh Discord-enabled volume installs the external plugin before gateway
+# readiness. Keep this aligned with the bounded local cold-start gate.
+healthcheckTimeout = 600
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 

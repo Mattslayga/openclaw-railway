@@ -7,6 +7,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "test:release-sentinel": "node --test tests/release-sentinel-contract.test.js",
+    "openclaw:record:channel-smoke": "bash scripts/record-openclaw-channel-smoke.sh",
     "openclaw:validate:local": "bash scripts/validate-openclaw-local.sh",
     "openclaw:validate:railway": "bash scripts/validate-openclaw-railway.sh",
     "openclaw:promote": "bash scripts/promote-openclaw-version.sh"
