@@ -208,7 +208,7 @@ done
 curl -sf "$HEALTH_URL/healthz" > "${ARTIFACT_DIR}/healthz.txt" || fail "staging health check failed"
 
 echo "[validate-railway] Capturing Railway logs"
-railway logs --lines 500 > "${ARTIFACT_DIR}/railway.log" 2>&1 || true
+railway logs --environment staging --service "$SERVICE_NAME" --lines 500 > "${ARTIFACT_DIR}/railway.log" 2>&1 || true
 
 if grep -Ei 'openclaw\.json\.clobbered|SECRETREF_FAIL|permission denied|EACCES|Cannot find module|Module not found|ready \(0 plugins\)|Gateway exited immediately|Watchdog: gateway process gone|UnhandledPromiseRejection|CIAO PROBING CANCELLED' "${ARTIFACT_DIR}/railway.log" \
   | grep -Eiv "failed to persist plugin auto-enable changes|failed to promote config last-known-good backup" \
