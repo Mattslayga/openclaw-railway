@@ -2,7 +2,6 @@
 
 ## Open Backlog (remove when resolved)
 
-- [SLA-204](https://linear.app/slaytek-systems/issue/SLA-204) — Gateway cron/heartbeat forks `openclaw agent` CLI as root, bypassing user-isolation hardening. Mitigation in place (entrypoint clears `.bak` each boot). Needs upstream investigation + honest note in `docs/SECURITY.md`.
 - [SLA-205](https://linear.app/slaytek-systems/issue/SLA-205) — Refactor `entrypoint.sh` (~800 lines, 12+ jobs) into `lib/` helpers. Triggered by upstream-churn patches needing edits across 4 sections.
 
 ## Overview

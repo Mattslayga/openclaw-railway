@@ -213,7 +213,7 @@ The most important protection. Restricts the agent's `read`, `write`, and `edit`
 
 Any attempt to access files outside `/data/workspace/` is rejected with "Path escapes sandbox root." This blocks reading secrets (`/proc/self/environ`, config files) and writing to security-critical files (`exec-approvals.json`, `openclaw.json`).
 
-**Note:** `exec` bypasses `workspaceOnly` — it operates through the shell, not the filesystem tools. At Tier 0, exec is restricted to `ls` only (metadata). At Tier 1, exec has a curated allowlist. At Tier 2+, exec is unrestricted — the behavioral template is the primary defense against config reads.
+**Note:** `exec` does not use the filesystem tool sandbox. At Tiers 0-1, both command names and arguments are restricted to workspace-relative operations. At Tier 2+, exec is unrestricted — the behavioral template is the primary defense against config and process reads.
 
 ### 2. Tool Policy (openclaw.json)
 

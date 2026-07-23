@@ -33,7 +33,8 @@
     "exec": {
       "host": "gateway",
       "security": "allowlist",
-      "ask": "off"
+      "ask": "off",
+      "strictInlineEval": true
     },
     "fs": {
       "workspaceOnly": true

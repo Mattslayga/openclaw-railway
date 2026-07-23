@@ -10,37 +10,38 @@
         {
           "id": "tier1-ls-usr",
           "pattern": "/usr/bin/ls",
+          "argPattern": "^(?:(?:-[A-Za-z]+|[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*)(?:\\s+|$))*$",
           "lastUsedCommand": "ls"
         },
         {
           "id": "tier1-ls-bin",
           "pattern": "/bin/ls",
+          "argPattern": "^(?:(?:-[A-Za-z]+|[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*)(?:\\s+|$))*$",
           "lastUsedCommand": "ls"
         },
         {
           "id": "tier1-find",
           "pattern": "/usr/bin/find",
+          "argPattern": "^\\.(?:\\s+(?:-maxdepth\\s+[0-9]+|-mindepth\\s+[0-9]+|-type\\s+[fdl]|-(?:name|iname)\\s+[A-Za-z0-9_.*?-]+|-print|-empty))*$",
           "lastUsedCommand": "find"
         },
         {
           "id": "tier1-wc",
           "pattern": "/usr/bin/wc",
+          "argPattern": "^(?:(?:-[clmwL]+|[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*)(?:\\s+|$))*$",
           "lastUsedCommand": "wc"
         },
         {
           "id": "tier1-sort",
           "pattern": "/usr/bin/sort",
+          "argPattern": "^(?:(?:-[rnufbV]+|--(?:reverse|numeric-sort|unique|ignore-case|version-sort))(?:\\s+|$))*$",
           "lastUsedCommand": "sort"
         },
         {
           "id": "tier1-uniq",
           "pattern": "/usr/bin/uniq",
+          "argPattern": "^(?:(?:-[cdui]+|--(?:count|repeated|unique|ignore-case))(?:\\s+|$))*$",
           "lastUsedCommand": "uniq"
-        },
-        {
-          "id": "tier1-git",
-          "pattern": "/usr/bin/git",
-          "lastUsedCommand": "git"
         }
       ]
     }

@@ -59,9 +59,15 @@ The agent's `read`, `write`, and `edit` tools are restricted to the workspace di
 
 This blocks:
 - Reading `/proc/self/environ` (API keys, tokens)
-- Reading `/data/.openclaw/openclaw.json` (config with secrets)
+- Reading `/data/.openclaw/openclaw.json` (config and SecretRef metadata)
 - Writing to either exec approvals file through agent filesystem tools (exec policy)
 - Any file access outside `/data/workspace/`
+
+The gateway must receive provider and channel secrets in its process environment
+so OpenClaw can resolve the SecretRef objects in `openclaw.json`. Those values are
+not written as plaintext to the config file. Tier 0-1 exec rules prevent absolute
+paths and path traversal, including reads from `/proc`; Tier 2+ full shell access
+can read same-user process environments and must be treated as trusted access.
 
 #### 2. Linux File Permissions (defense in depth)
 
@@ -78,6 +84,14 @@ The entrypoint also hardens file ownership as a second layer. Even if `workspace
 | `/data/workspace/MEMORY.md` etc. | openclaw:openclaw | 644 | User files — read/write |
 
 Behavioral template files (`AGENTS.md`, `TOOLS.md`, `PROGRESSION.md`, `PROJECTS.md`) are locked to `root:openclaw 440` and forcibly restored from the container image on every startup. This prevents a prompt injection from persistently rewriting the agent's safety instructions.
+
+#### 3. Runtime User Isolation
+
+The entrypoint starts the gateway and health server as the `openclaw` user
+(`uid 1001`). A root-owned `su` wrapper can appear in process listings, but the
+actual `openclaw` and health-server processes are non-root. Child processes,
+including scheduled and heartbeat work, inherit that non-root user. Local
+release validation checks this ownership on every candidate.
 
 ## What Each Blocked Tool Does
 
@@ -98,7 +112,7 @@ These tools are blocked at Tier 0 (default). See [TIERS.md](docs/TIERS.md) for w
 
 ### Owner Allowlist
 
-When you set `TELEGRAM_OWNER_ID` (or Discord/Slack equivalent), you're added to the allowlist. You can message the bot immediately without pairing.
+When you set `TELEGRAM_OWNER_ID` (or Discord/Slack equivalent), you're added to the allowlist. You can message the bot immediately without pairing. For Telegram, that owner is also the only sender allowed to trigger the bot in groups; group access is disabled when no owner ID is configured.
 
 ### Pairing for Others
 
@@ -158,9 +172,9 @@ Railway's container provides hard boundaries:
 | Risk | Mitigation |
 |------|------------|
 | Prompt injection | Tool policy limits blast radius |
-| API key theft | `workspaceOnly` blocks reads outside workspace; config write-locked; `env -i` on gateway process |
+| API key theft | `workspaceOnly` blocks filesystem-tool reads; config contains SecretRefs instead of plaintext; Tier 0-1 exec arguments cannot reach `/proc`; Tier 2+ remains trusted |
 | Data exfiltration via `web_fetch` | `web_fetch` is GET-only (limits payload size to URL parameters); `workspaceOnly` restricts what can be read; behavioral templates instruct refusal of exfil requests. **No URL allowlist** — accepted residual risk, see below |
-| Data exfiltration via `exec` | Exec allowlist at Tiers 0-1; `env -i` prevents env var leaks; OC-09 fix blocks `$VAR` injection |
+| Data exfiltration via `exec` | Tiers 0-1 constrain both executable paths and arguments; `strictInlineEval` blocks hidden command execution; Tier 2+ is unrestricted by design |
 | Resource exhaustion | Railway's resource limits apply |
 
 ## Upstream Security Hardening (v2026.2.12–2026.2.17)
@@ -200,9 +214,9 @@ This template does not enforce a URL/domain allowlist on `web_fetch` or `web_sea
 This template combines upstream gateway hardening with its own security layers:
 
 1. **`tools.fs.workspaceOnly: true`** — Blocks file access outside workspace
-2. **`env -i` process isolation** — No secrets in `/proc/self/environ`
-3. **Linux file permissions** — Config 640, dirs 750, behavioral templates 440
-4. **Exec allowlist** — Tier-appropriate command restrictions
+2. **Non-root process isolation** — Gateway and health server run as `uid 1001`; only the gateway receives required secrets
+3. **Linux file permissions** — Config 640, protected state directory 1770, behavioral templates 440
+4. **Exec allowlist** — Tier 0-1 restrict both executable paths and argument shapes
 5. **Behavioral templates** — Locked and force-restored on every startup
 6. **Upstream SSRF guards** — Gateway blocks private/internal hostnames
 7. **Upstream OC-09 fix** — Exec env var injection patched at gateway level

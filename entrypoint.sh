@@ -227,7 +227,7 @@ case "$SECURITY_TIER" in
     ;;
   1)
     TIER_NAME="Capable Agent"
-    TIER_EXEC_COMMANDS="ls, find, wc, sort, uniq, git"
+    TIER_EXEC_COMMANDS="ls, find, wc, sort, uniq"
     ;;
   2)
     TIER_NAME="Power User"
@@ -316,7 +316,7 @@ echo "[entrypoint] Behavioral templates locked (root:openclaw 440)"
 # -----------------------------------------------------------------------------
 # 3. Deploy exec-approvals (tier-aware)
 #    Tier 0: ls only, ask off
-#    Tier 1: curated list (find, git, wc, sort, uniq), ask off
+#    Tier 1: workspace-scoped list (find, wc, sort, uniq), ask off
 #    Tier 2+: full exec, no allowlist needed
 #    OpenClaw <=2026.5 reads ~/.openclaw; 2026.7+ reads $OPENCLAW_STATE_DIR.
 #    Deploy both during the compatibility window so upgrades do not need the

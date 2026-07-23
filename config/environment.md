@@ -121,7 +121,7 @@ See [PROVIDERS.md](../docs/PROVIDERS.md) for more details.
 | Variable | Description |
 |----------|-------------|
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
-| `TELEGRAM_OWNER_ID` | Your Telegram user ID (get from @userinfobot) - skips pairing |
+| `TELEGRAM_OWNER_ID` | Your Telegram user ID (get from @userinfobot) - skips DM pairing and is the only sender allowed to trigger the bot in groups. Without it, Telegram groups are disabled |
 
 ### Discord
 
@@ -197,7 +197,7 @@ Control your agent's capabilities via environment variable. No SSH needed for Ti
 | Tier | Name | What It Adds |
 |------|------|-------------|
 | 0 | Personal Assistant | Web search/fetch, memory, read/write, ls, cron, apply_patch, image |
-| 1 | Capable Agent | + curated exec (find, wc, sort, uniq, git) |
+| 1 | Capable Agent | + workspace-scoped exec (find, wc, sort, uniq) |
 | 2 | Power User | + full exec, browser (remote), sub-agents, process management |
 | 3 | Operator | SSH only. Applies Tier 2 via env var, guides you to SSH for the rest |
 

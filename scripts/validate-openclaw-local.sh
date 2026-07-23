@@ -120,6 +120,39 @@ if [[ "$INSTALLED_VERSION" != *"$VERSION"* ]]; then
   fail "installed version did not match candidate"
 fi
 
+echo "[validate-local] Verifying Telegram group access defaults"
+docker run --rm --entrypoint sh \
+  -e OPENCLAW_CONFIG_PATH=/tmp/openclaw.json \
+  -e OPENROUTER_API_KEY=validation-openrouter-key \
+  -e LLM_PRIMARY_MODEL=openrouter/openai/gpt-4o-mini \
+  -e TELEGRAM_BOT_TOKEN=validation-telegram-token \
+  -e TELEGRAM_OWNER_ID=111111111 \
+  "$IMAGE_TAG" -c '
+    node /app/src/build-config.js >/dev/null &&
+    node -e "
+      const fs = require(\"fs\");
+      const config = JSON.parse(fs.readFileSync(\"/tmp/openclaw.json\", \"utf8\"));
+      const telegram = config.channels?.telegram;
+      if (telegram?.groupPolicy !== \"allowlist\") throw new Error(\"Telegram owner group policy is not allowlist\");
+      if (!telegram?.groupAllowFrom?.includes(111111111)) throw new Error(\"Telegram owner is missing from groupAllowFrom\");
+      if (telegram?.groups?.[\"*\"]?.requireMention !== true) throw new Error(\"Telegram groups do not require mentions\");
+    "
+  ' || fail "Telegram owner group access is not fail-closed"
+
+docker run --rm --entrypoint sh \
+  -e OPENCLAW_CONFIG_PATH=/tmp/openclaw.json \
+  -e OPENROUTER_API_KEY=validation-openrouter-key \
+  -e LLM_PRIMARY_MODEL=openrouter/openai/gpt-4o-mini \
+  -e TELEGRAM_BOT_TOKEN=validation-telegram-token \
+  "$IMAGE_TAG" -c '
+    node /app/src/build-config.js >/dev/null &&
+    node -e "
+      const fs = require(\"fs\");
+      const config = JSON.parse(fs.readFileSync(\"/tmp/openclaw.json\", \"utf8\"));
+      if (config.channels?.telegram?.groupPolicy !== \"disabled\") throw new Error(\"Telegram groups are enabled without an owner\");
+    "
+  ' || fail "Telegram groups are not disabled without an owner"
+
 echo "[validate-local] Booting container"
 docker run -d \
   --name "$CONTAINER_NAME" \
@@ -159,6 +192,34 @@ docker logs "$CONTAINER_NAME" >"$LOG_FILE" 2>&1 || true
 
 if ! docker exec "$CONTAINER_NAME" curl -sf "http://localhost:8080/healthz" >/dev/null 2>&1; then
   fail "healthz did not become healthy"
+fi
+
+echo "[validate-local] Verifying runtime process isolation"
+docker exec "$CONTAINER_NAME" ps -eo user,uid,pid,ppid,args > "${ARTIFACT_DIR}/processes.txt"
+if ! docker exec "$CONTAINER_NAME" sh -c '
+  gateway_pids="$(pgrep -x openclaw 2>/dev/null || true)"
+  [ -n "$gateway_pids" ] || exit 1
+  for pid in $gateway_pids; do
+    [ "$(stat -c %u "/proc/$pid")" = "1001" ] || exit 1
+  done
+  ! pgrep -u 0 -x openclaw >/dev/null 2>&1
+'; then
+  fail "gateway process is missing or running as root"
+fi
+if ! docker exec "$CONTAINER_NAME" sh -c '
+  found=0
+  for pid in $(pgrep -x node 2>/dev/null || true); do
+    command="$(tr "\000" " " < "/proc/$pid/cmdline")"
+    case "$command" in
+      *"node src/server.js"*)
+        found=1
+        [ "$(stat -c %u "/proc/$pid")" = "1001" ] || exit 1
+        ;;
+    esac
+  done
+  [ "$found" = "1" ]
+'; then
+  fail "health server is missing or running as root"
 fi
 
 echo "[validate-local] Inspecting generated config and permissions"
@@ -205,6 +266,7 @@ docker exec "$CONTAINER_NAME" node -e "
 const fs = require('fs');
 const config = JSON.parse(fs.readFileSync('/data/.openclaw/openclaw.json', 'utf8'));
 if (config.tools?.exec?.security !== 'allowlist') throw new Error('Tier 0 exec security is not allowlist');
+if (config.tools?.exec?.strictInlineEval !== true) throw new Error('Tier 0 strictInlineEval hardening is not enabled');
 if (!config.tools?.fs?.workspaceOnly) throw new Error('workspaceOnly fs policy is not enabled');
 const guild = config.channels?.discord?.guilds?.['222222222222222222'];
 if (!guild) throw new Error('Discord guild config was not generated');
@@ -214,6 +276,19 @@ if (guild.channels?.['444444444444444444']?.requireMention !== false) throw new 
 if (!config.plugins?.allow?.includes('discord')) throw new Error('Discord plugin trust allowlist was not generated');
 if (config.tools?.web?.search?.provider === 'brave') throw new Error('Brave web_search provider should not be configured when unavailable');
 " || fail "security config assertions failed"
+
+docker exec "$CONTAINER_NAME" node -e "
+const fs = require('fs');
+const approvals = JSON.parse(fs.readFileSync('/data/.openclaw/exec-approvals.json', 'utf8'));
+const entries = approvals.agents?.main?.allowlist || [];
+if (entries.length === 0) throw new Error('Tier 0 approvals are empty');
+for (const entry of entries) {
+  if (!entry.argPattern) throw new Error(entry.id + ' has unrestricted arguments');
+  const pattern = new RegExp(entry.argPattern);
+  if (pattern.test('/data/.openclaw')) throw new Error(entry.id + ' allows absolute sensitive paths');
+  if (pattern.test('../.openclaw')) throw new Error(entry.id + ' allows path traversal');
+}
+" || fail "deployed exec approvals are not argument-constrained"
 
 echo "[validate-local] Scanning logs for blocker patterns"
 if grep -Ei 'openclaw\.json\.clobbered|SECRETREF_FAIL|permission denied|EACCES|Cannot find module|Module not found|ready \(0 plugins\)|Gateway exited immediately|Watchdog: gateway process gone|UnhandledPromiseRejection|CIAO PROBING CANCELLED' "$LOG_FILE" \
@@ -236,14 +311,16 @@ write_summary "pass" "all local Docker gates passed"
   echo "- npm package exists"
   echo "- Docker image builds"
   echo "- installed version matches"
+  echo "- Telegram group access is owner-only and fails closed without an owner"
   echo "- container boots"
   echo "- /healthz passes"
+  echo "- gateway and health server run as non-root uid 1001"
   echo "- config exists with root:openclaw 640"
   echo "- state dir is root:openclaw 1770 and sticky-bit protects root-owned config"
   echo "- state-dir exec approvals are openclaw:openclaw 600 for atomic updates"
   echo "- Discord plugin is explicitly trusted, enabled, loaded, and dependency-complete"
   echo "- OpenClaw config schema validation passes"
-  echo "- Tier 0 exec allowlist, workspaceOnly, and Discord guild config assertions pass"
+  echo "- Tier 0 exec allowlist arguments, strictInlineEval, workspaceOnly, and Discord guild config assertions pass"
   echo "- blocker log scan passes"
 } > "$REPORT_MD"
 
