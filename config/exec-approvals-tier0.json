@@ -10,11 +10,13 @@
         {
           "id": "tier0-ls-usr",
           "pattern": "/usr/bin/ls",
+          "argPattern": "^(?:(?:-[A-Za-z]+|[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*)(?:\\s+|$))*$",
           "lastUsedCommand": "ls"
         },
         {
           "id": "tier0-ls-bin",
           "pattern": "/bin/ls",
+          "argPattern": "^(?:(?:-[A-Za-z]+|[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*)(?:\\s+|$))*$",
           "lastUsedCommand": "ls"
         }
       ]

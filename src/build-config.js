@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Create a SecretRef object that tells the gateway to resolve a secret
@@ -83,7 +84,7 @@ const TIER_NAMES = {
  * Tier 0 uses defaults.json as-is.
  * Higher tiers progressively unlock more capabilities.
  */
-function applySecurityTier(config, tier) {
+export function applySecurityTier(config, tier) {
   config.tools = config.tools || {};
 
   if (tier === 0) {
@@ -119,6 +120,7 @@ function applySecurityTier(config, tier) {
     config.tools.exec.host = 'gateway';
     config.tools.exec.security = 'full';
     config.tools.exec.ask = 'off';
+    config.tools.exec.strictInlineEval = false;
     return;
   }
 }
@@ -379,13 +381,19 @@ function buildConfig() {
         config.channels.telegram.allowFrom.push(ownerId);
       }
       config.channels.telegram.dmPolicy = 'allowlist';
+      config.channels.telegram.groupPolicy = 'allowlist';
+      config.channels.telegram.groupAllowFrom = config.channels.telegram.groupAllowFrom || [];
+      if (!config.channels.telegram.groupAllowFrom.includes(ownerId)) {
+        config.channels.telegram.groupAllowFrom.push(ownerId);
+      }
+
+      // Any group may host the bot, but only the configured owner can trigger it.
+      config.channels.telegram.groups = config.channels.telegram.groups || {};
+      config.channels.telegram.groups['*'] = { requireMention: true };
     } else {
       config.channels.telegram.dmPolicy = 'pairing';
+      config.channels.telegram.groupPolicy = 'disabled';
     }
-
-    // Groups require mention by default
-    config.channels.telegram.groups = config.channels.telegram.groups || {};
-    config.channels.telegram.groups['*'] = { requireMention: true };
 
     // Suppress error messages in chat (v2026.3.22+) — errors still appear in gateway logs
     config.channels.telegram.silentErrorReplies = true;
@@ -416,6 +424,7 @@ function buildConfig() {
   // --- Discord ---
   if (process.env.DISCORD_BOT_TOKEN) {
     config.plugins = config.plugins || {};
+    config.plugins.allow = Array.from(new Set([...(config.plugins.allow || []), 'discord']));
     config.plugins.entries = config.plugins.entries || {};
     config.plugins.entries.discord = { enabled: true };
 
@@ -734,4 +743,6 @@ function main() {
   process.stdout.write(summary + '\n');
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

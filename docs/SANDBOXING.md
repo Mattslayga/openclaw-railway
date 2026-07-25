@@ -213,7 +213,7 @@ The most important protection. Restricts the agent's `read`, `write`, and `edit`
 
 Any attempt to access files outside `/data/workspace/` is rejected with "Path escapes sandbox root." This blocks reading secrets (`/proc/self/environ`, config files) and writing to security-critical files (`exec-approvals.json`, `openclaw.json`).
 
-**Note:** `exec` bypasses `workspaceOnly` — it operates through the shell, not the filesystem tools. At Tier 0, exec is restricted to `ls` only (metadata). At Tier 1, exec has a curated allowlist. At Tier 2+, exec is unrestricted — the behavioral template is the primary defense against config reads.
+**Note:** `exec` does not use the filesystem tool sandbox. At Tiers 0-1, both command names and arguments are restricted to workspace-relative operations. At Tier 2+, exec is unrestricted — the behavioral template is the primary defense against config and process reads.
 
 ### 2. Tool Policy (openclaw.json)
 
@@ -239,8 +239,10 @@ The entrypoint hardens file ownership as a backup layer:
 | What's protected | How |
 |-----------------|-----|
 | `openclaw.json` (config) | `root:openclaw 640` — agent cannot write |
-| `.openclaw/` directories | `root:openclaw 750` — agent cannot create new files |
-| `exec-approvals.json` | `root:openclaw 660` — gateway needs write for metadata |
+| `/data/.openclaw/` | `root:openclaw 1770` — sticky bit protects root-owned config while the runtime atomically updates state |
+| `/home/openclaw/.openclaw/` | `root:openclaw 750` — legacy approvals directory is not writable |
+| `/data/.openclaw/exec-approvals.json` | `openclaw:openclaw 600` — current runtime updates approvals atomically |
+| `/home/openclaw/.openclaw/exec-approvals.json` | `root:openclaw 660` — compatibility path for older runtimes |
 | Behavioral templates | `root:openclaw 440` — restored from image on every startup |
 | Non-essential env vars | Scrubbed from environment after config generation |
 

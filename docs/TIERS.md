@@ -95,17 +95,17 @@ Note: `memory_search` is auto-configured when using OpenRouter or OpenAI as your
 
 ## Tier 1: Capable Agent
 
-Everything in Tier 0, plus curated shell commands with user approval.
+Everything in Tier 0, plus a small set of workspace-scoped shell commands.
 
 **Additional capabilities:**
-- Run curated shell commands: `find`, `wc`, `sort`, `uniq`, `git`
+- Run restricted shell commands: `find`, `wc`, `sort`, `uniq`
 - File reading and searching handled by the `read` tool (sandboxed to workspace)
+- Command arguments are limited to workspace-relative paths and safe operations
 - Commands not in the allowlist are silently denied — no approval queue
 
 **What this looks like in practice:**
 - You drop a CSV export of your expenses into the workspace. "How much did I spend on dining out last month?" — agent reads the file and processes it with `sort`, `wc`, and `uniq`.
 - "Find every time I mentioned pricing in my notes" — agent uses `find` to locate files, then `read` to search through them.
-- You accidentally delete something from a note. Agent recovers it from git history — your workspace has version control built in.
 - "Organize these 30 meeting notes by topic and make an index" — agent reads through files, categorizes, builds a structured overview.
 - You export your contacts from your phone as a CSV. "Sort these by last name and remove duplicates" — done.
 
@@ -420,10 +420,11 @@ Delete the volume in Railway dashboard and redeploy. This wipes everything — c
 - `web_fetch` is GET-only, limiting exfiltration payload size to URL parameters.
 
 **Tier 1 (curated shell):**
-- The allowlist restricts which commands the agent can run. Content-reading binaries (`cat`, `head`, `tail`, `grep`) are excluded — the `read` tool handles file reading within the workspace sandbox.
+- The allowlist restricts both the commands and their arguments. Paths must stay relative to the workspace, and dangerous forms such as `find -exec` and `find -delete` are denied.
+- Content-reading binaries (`cat`, `head`, `tail`, `grep`) and `git` are excluded — the `read` tool handles file reading within the workspace sandbox.
 - Commands not in the allowlist are denied. No approval queue — add commands via `EXEC_EXTRA_COMMANDS` or the exec-approvals file.
 - Chaining (`;`, `&&`, `||`) and redirections are blocked.
-- OC-09 fix (v2026.2.14+) blocks `$VAR` injection in exec scripts — defense-in-depth alongside `env -i`.
+- `strictInlineEval` blocks commands that hide another command inside their arguments.
 
 **Tier 2 (full shell + browser):**
 - The agent can run any command in the container with no approval gate.

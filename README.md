@@ -78,7 +78,7 @@ An AI assistant that runs 24/7 on your own infrastructure, connected to your cha
 | Tier | Name | What It Adds |
 |------|------|-------------|
 | 0 | Personal Assistant | Web, memory, read/write, cron *(default)* |
-| 1 | Capable Agent | + curated shell (find, git, wc, sort, uniq) |
+| 1 | Capable Agent | + workspace-scoped shell (`find`, `wc`, `sort`, `uniq`) |
 | 2 | Power User | + full shell, remote browser, sub-agents |
 | 3 | Operator | + unrestricted access (requires SSH) |
 
@@ -88,8 +88,8 @@ Set `SECURITY_TIER=1` and redeploy. That's it. See [docs/TIERS.md](docs/TIERS.md
 
 This template wraps OpenClaw with 5 layers of hardening:
 
-1. **Filesystem sandboxing** — `workspaceOnly` restricts all file access to `/data/workspace/`
-2. **Process isolation** — Gateway runs with `env -i`, no secrets in `/proc/self/environ`
+1. **Filesystem sandboxing** — `workspaceOnly` restricts file tools to `/data/workspace/`; restricted tiers separately constrain shell paths
+2. **Process isolation** — Gateway and health server run as a non-root user; only the gateway receives the secrets it needs
 3. **File permissions** — Config files root-owned 640, behavioral templates read-only 440
 4. **Behavioral templates** — Agent identity and guardrails restored from image on every deploy
 5. **Log filtering** — Response text stripped from deploy logs

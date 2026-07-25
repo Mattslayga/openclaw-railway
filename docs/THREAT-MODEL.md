@@ -83,9 +83,9 @@ This document is brutally honest about what can go wrong, what's at risk, and wh
 
 | Location | Contents | Can Agent Access? |
 |----------|----------|-------------------|
-| `/data/.openclaw/openclaw.json` | Gateway token, channel config, API keys | No (`workspaceOnly` blocks file tools; 640 root:openclaw perms) |
+| `/data/.openclaw/openclaw.json` | Gateway config and SecretRef metadata | No (`workspaceOnly` blocks file tools; 640 root:openclaw perms) |
 | `/data/workspace/*` | User files | Yes (sandboxed here) |
-| Environment variables | API keys from Railway | No (`env -i` — gateway starts with empty environment) |
+| Gateway environment | API keys and channel tokens required for SecretRef resolution | Not at Tiers 0-1; Tier 2+ full shell can inspect same-user processes |
 | `/data/.openclaw/gateway.log` | Message history, commands | No (`workspaceOnly` blocks access) |
 
 ## Financial Risk
@@ -130,7 +130,7 @@ This document is brutally honest about what can go wrong, what's at risk, and wh
 
 **Total damage**: $500 to $50,000+ depending on attacker motivation and what was in your workspace.
 
-> **With this template's defaults (Tier 0):** Steps 1-2 are blocked. `workspaceOnly` prevents config reads, `env -i` empties the process environment, and file permissions (640 root:openclaw) block writes. The timeline above applies to vanilla OpenClaw without hardening. At Tier 2+ with full exec, steps 1-2 become possible again via shell commands — see the tier system docs for risk details.
+> **With this template's defaults (Tier 0):** Steps 1-2 are blocked. `workspaceOnly` prevents config reads, exec arguments cannot address `/proc` or paths outside the workspace, and file permissions block config writes. The gateway still receives the secrets needed to resolve SecretRefs. At Tier 2+ with full exec, process and config inspection become possible again — see the tier system docs for risk details.
 
 ---
 

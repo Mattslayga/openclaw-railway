@@ -47,7 +47,7 @@ bun run openclaw:validate:railway -- 2026.5.2-beta.2
 
 The staging gate requires a passing local validation artifact first. It deploys
 the candidate from a temporary deploy bundle with that candidate baked into the
-Dockerfile, checks health when a staging URL is provided, captures Railway logs,
+Dockerfile, requires and checks the external staging health URL, captures Railway logs,
 and blocks on known failure patterns. Set `OPENCLAW_RAILWAY_STAGING_SERVICE` if
 your linked Railway service is not the staging service.
 
@@ -60,8 +60,8 @@ Before promotion, also run a live channel smoke test with staging credentials:
 
 ## Promotion
 
-Promotion is blocked until both local and Railway validation artifacts exist and
-are passing:
+Promotion is blocked until local, Railway, and recorded channel-scope evidence
+exist, describe the same repository state, and are passing:
 
 ```bash
 bun run openclaw:promote -- 2026.5.2-beta.2

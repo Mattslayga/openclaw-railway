@@ -30,49 +30,100 @@ EOF
   exit 1
 fi
 
+SERVICE_NAME="${OPENCLAW_RAILWAY_STAGING_SERVICE:-openclaw-railway-staging}"
 LINKED_STATUS_JSON="$(mktemp)"
 railway status --json > "$LINKED_STATUS_JSON"
-node - "$LINKED_STATUS_JSON" "${OPENCLAW_RAILWAY_PROJECT_ID:-}" <<'NODE'
-const fs = require('fs');
-const [path, expectedProjectId] = process.argv.slice(2);
-const status = JSON.parse(fs.readFileSync(path, 'utf8'));
-const envs = status.environments?.edges?.map(e => e.node?.name).filter(Boolean) ?? [];
-if (expectedProjectId && status.id !== expectedProjectId) {
-  console.error(`ERROR: linked Railway project is ${status.name} (${status.id}), expected ${expectedProjectId}.`);
-  console.error('Run: railway project link --project <id> --environment staging --service <staging-service>');
-  process.exit(1);
-}
-if (!envs.includes('staging')) {
-  console.error(`ERROR: linked Railway project ${status.name} has no staging environment.`);
-  process.exit(1);
-}
-NODE
+node scripts/lib/railway-staging-context.js \
+  "$LINKED_STATUS_JSON" \
+  "${OPENCLAW_RAILWAY_PROJECT_ID:-}" \
+  "$SERVICE_NAME" >/dev/null
 rm -f "$LINKED_STATUS_JSON"
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
 SAFE_VERSION="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._-' '_')"
 ARTIFACT_DIR=".validation/openclaw/${SAFE_VERSION}/${RUN_ID}-railway"
 TMP_DIR="$(mktemp -d)"
+SUMMARY_JSON="${ARTIFACT_DIR}/summary.json"
+REPORT_MD="${ARTIFACT_DIR}/report.md"
+CONTEXT_JSON="${ARTIFACT_DIR}/context.json"
 mkdir -p "$ARTIFACT_DIR"
+node scripts/lib/release-sentinel-contract.js context "$ROOT_DIR" > "$CONTEXT_JSON"
+
+write_summary() {
+  local status="$1"
+  local reason="$2"
+  node - "$SUMMARY_JSON" "$CONTEXT_JSON" "$VERSION" "$status" "$reason" "$RUN_ID" <<'NODE'
+const fs = require('fs');
+const [path, contextPath, version, status, reason, runId] = process.argv.slice(2);
+const context = JSON.parse(fs.readFileSync(contextPath, 'utf8'));
+fs.writeFileSync(path, JSON.stringify({
+  target: 'railway-staging',
+  version,
+  status,
+  reason,
+  runId,
+  ...context,
+  externalHealth: status === 'pass' ? 'pass' : 'fail',
+  channelSmoke: 'not_run',
+  generatedAt: new Date().toISOString(),
+}, null, 2) + '\n');
+NODE
+}
+
+fail() {
+  local reason="$1"
+  write_summary "fail" "$reason"
+  cat > "$REPORT_MD" <<EOF
+# OpenClaw Railway Staging Validation: ${VERSION}
+
+Status: FAIL
+Reason: ${reason}
+Run: ${RUN_ID}
+Evidence context: ${CONTEXT_JSON}
+EOF
+  echo "ERROR: $reason"
+  echo "Report: ${REPORT_MD}"
+  exit 1
+}
 
 cleanup() {
+  local exit_code=$?
+  if [[ "$exit_code" -ne 0 && ! -f "$SUMMARY_JSON" ]]; then
+    write_summary "fail" "validation exited unexpectedly with status ${exit_code}"
+    cat > "$REPORT_MD" <<EOF
+# OpenClaw Railway Staging Validation: ${VERSION}
+
+Status: FAIL
+Reason: validation exited unexpectedly with status ${exit_code}
+Evidence context: ${CONTEXT_JSON}
+EOF
+  fi
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
 echo "[validate-railway] Confirming local candidate passed first"
-LATEST_LOCAL_SUMMARY="$(find ".validation/openclaw/${SAFE_VERSION}" -path '*/summary.json' -not -path '*-railway/*' -print 2>/dev/null | sort | tail -1 || true)"
+LATEST_LOCAL_SUMMARY="$(find ".validation/openclaw/${SAFE_VERSION}" -path '*/summary.json' -not -path '*-railway/*' -not -path '*-sentinel/*' -not -path '*-channel-smoke/*' -print 2>/dev/null | sort | tail -1 || true)"
 if [[ -z "$LATEST_LOCAL_SUMMARY" ]]; then
   echo "ERROR: no local validation summary found for ${VERSION}"
   echo "Run: bun run openclaw:validate:local -- ${VERSION}"
   exit 1
 fi
-node - "$LATEST_LOCAL_SUMMARY" <<'NODE'
+node - "$LATEST_LOCAL_SUMMARY" "$CONTEXT_JSON" "$VERSION" <<'NODE'
 const fs = require('fs');
-const path = process.argv[2];
+const [path, contextPath, version] = process.argv.slice(2);
 const summary = JSON.parse(fs.readFileSync(path, 'utf8'));
-if (summary.status !== 'pass') {
+const context = JSON.parse(fs.readFileSync(contextPath, 'utf8'));
+if (summary.target !== 'local-docker' || summary.status !== 'pass') {
   console.error(`ERROR: latest local validation is not passing: ${path}`);
+  process.exit(1);
+}
+if (summary.version !== version) {
+  console.error(`ERROR: local validation is for ${summary.version}, not ${version}: ${path}`);
+  process.exit(1);
+}
+if (summary.repoCommit !== context.repoCommit || summary.workspaceFingerprint !== context.workspaceFingerprint) {
+  console.error(`ERROR: local validation evidence does not match the current repository state: ${path}`);
   process.exit(1);
 }
 NODE
@@ -109,7 +160,6 @@ railway "${RAILWAY_ARGS[@]}" > "${ARTIFACT_DIR}/railway-up.log" 2>&1
 
 echo "[validate-railway] Waiting for health"
 echo "[validate-railway] Waiting for Railway deployment to become active"
-SERVICE_NAME="${OPENCLAW_RAILWAY_STAGING_SERVICE:-openclaw-railway-staging}"
 STATUS_JSON="${ARTIFACT_DIR}/service-status.json"
 ACTIVE="false"
 for _ in $(seq 1 90); do
@@ -134,44 +184,37 @@ if [[ "$ACTIVE" != "true" ]]; then
   exit 1
 fi
 
+railway status --json > "${ARTIFACT_DIR}/railway-context.json"
+node scripts/lib/railway-staging-context.js \
+  "${ARTIFACT_DIR}/railway-context.json" \
+  "${OPENCLAW_RAILWAY_PROJECT_ID:-}" \
+  "$SERVICE_NAME" > "${ARTIFACT_DIR}/staging-context.json" \
+  || fail "Railway Serverless was disabled during the staging deploy"
+
 HEALTH_URL="${OPENCLAW_STAGING_HEALTH_URL:-}"
 if [[ -z "$HEALTH_URL" ]]; then
-  echo "OPENCLAW_STAGING_HEALTH_URL is not set; external health URL check skipped."
-else
-  for _ in $(seq 1 60); do
-    if curl -sf "$HEALTH_URL/healthz" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 5
-  done
-  curl -sf "$HEALTH_URL/healthz" > "${ARTIFACT_DIR}/healthz.txt" || {
-    echo "ERROR: staging health check failed"
-    exit 1
-  }
+  fail "OPENCLAW_STAGING_HEALTH_URL is required"
 fi
+for _ in $(seq 1 60); do
+  if curl -sf "$HEALTH_URL/healthz" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 5
+done
+curl -sf "$HEALTH_URL/healthz" > "${ARTIFACT_DIR}/healthz.txt" || fail "staging health check failed"
 
 echo "[validate-railway] Capturing Railway logs"
-railway logs --lines 500 > "${ARTIFACT_DIR}/railway.log" 2>&1 || true
+railway logs --environment staging --service "$SERVICE_NAME" --lines 500 > "${ARTIFACT_DIR}/railway.log" 2>&1 || true
 
 if grep -Ei 'openclaw\.json\.clobbered|SECRETREF_FAIL|permission denied|EACCES|Cannot find module|Module not found|ready \(0 plugins\)|Gateway exited immediately|Watchdog: gateway process gone|UnhandledPromiseRejection|CIAO PROBING CANCELLED' "${ARTIFACT_DIR}/railway.log" \
   | grep -Eiv "failed to persist plugin auto-enable changes|failed to promote config last-known-good backup" \
   > "${ARTIFACT_DIR}/blockers.txt"; then
-  echo "ERROR: blocker log pattern found"
-  exit 1
+  fail "blocker log pattern found"
 fi
 
-cat > "${ARTIFACT_DIR}/summary.json" <<EOF
-{
-  "target": "railway-staging",
-  "version": "${VERSION}",
-  "status": "pass",
-  "reason": "staging deploy/log gates passed",
-  "runId": "${RUN_ID}",
-  "generatedAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-}
-EOF
+write_summary "pass" "staging deploy, external health, and log gates passed"
 
-cat > "${ARTIFACT_DIR}/report.md" <<EOF
+cat > "$REPORT_MD" <<EOF
 # OpenClaw Railway Staging Validation: ${VERSION}
 
 Status: PASS
@@ -179,14 +222,18 @@ Run: ${RUN_ID}
 
 Gates:
 - Prior local Docker validation found
+- Local and staging evidence match the same repository state
 - Railway staging deploy completed
 - Railway deployment became active
-- Health check passed when OPENCLAW_STAGING_HEALTH_URL was provided
+- Railway Serverless remained enabled
+- External health check passed
 - blocker log scan passed
+
+Evidence context: ${CONTEXT_JSON}
 
 Manual live-channel smoke test is still required before promotion unless the
 staging service is wired with a dedicated test bot and observer automation.
 EOF
 
 echo "PASS: Railway staging validation passed"
-echo "Report: ${ARTIFACT_DIR}/report.md"
+echo "Report: ${REPORT_MD}"

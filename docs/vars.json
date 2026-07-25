@@ -455,7 +455,7 @@
           "required": false,
           "options": [
             { "value": "0", "label": "Tier 0 — Personal Assistant", "description": "Web, memory, read/write, cron. Safe default.", "badge": "Most users start here" },
-            { "value": "1", "label": "Tier 1 — Capable Agent", "description": "+ curated shell (find, git, wc, sort, uniq)" },
+            { "value": "1", "label": "Tier 1 — Capable Agent", "description": "+ workspace-scoped shell (find, wc, sort, uniq)" },
             { "value": "2", "label": "Tier 2 — Power User", "description": "+ full shell, remote browser, sub-agents" },
             { "value": "3", "label": "Tier 3 — Operator", "description": "Applies Tier 2, guides you to SSH for the rest" }
           ]
