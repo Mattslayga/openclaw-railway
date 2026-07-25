@@ -10,6 +10,7 @@ import {
   selectCandidate,
   shouldEvaluate,
 } from '../scripts/lib/release-sentinel-contract.js';
+import { validateStagingContext } from '../scripts/lib/railway-staging-context.js';
 
 test('selects only a changed stable/latest candidate', () => {
   assert.equal(selectCandidate({ currentPin: '2026.5.22', latestStable: '2026.7.1-2' }), '2026.7.1-2');
@@ -43,4 +44,50 @@ test('turns known failures into focused repair classifications', () => {
 
   const unknown = classifyFailure('something novel happened');
   assert.equal(unknown.id, 'unclassified');
+});
+
+test('requires Railway Serverless on the isolated staging service', () => {
+  const status = {
+    id: 'project-id',
+    name: 'OpenClaw Railway',
+    environments: {
+      edges: [
+        {
+          node: {
+            id: 'staging-id',
+            name: 'staging',
+            serviceInstances: {
+              edges: [
+                {
+                  node: {
+                    serviceId: 'service-id',
+                    serviceName: 'openclaw-railway-staging',
+                    latestDeployment: {
+                      meta: {
+                        serviceManifest: {
+                          deploy: { sleepApplication: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    },
+  };
+
+  assert.equal(
+    validateStagingContext(status, 'project-id', 'openclaw-railway-staging').sleepApplication,
+    true,
+  );
+
+  status.environments.edges[0].node.serviceInstances.edges[0].node.latestDeployment.meta.serviceManifest.deploy.sleepApplication =
+    false;
+  assert.throws(
+    () => validateStagingContext(status, 'project-id', 'openclaw-railway-staging'),
+    /Serverless/,
+  );
 });

@@ -30,23 +30,13 @@ EOF
   exit 1
 fi
 
+SERVICE_NAME="${OPENCLAW_RAILWAY_STAGING_SERVICE:-openclaw-railway-staging}"
 LINKED_STATUS_JSON="$(mktemp)"
 railway status --json > "$LINKED_STATUS_JSON"
-node - "$LINKED_STATUS_JSON" "${OPENCLAW_RAILWAY_PROJECT_ID:-}" <<'NODE'
-const fs = require('fs');
-const [path, expectedProjectId] = process.argv.slice(2);
-const status = JSON.parse(fs.readFileSync(path, 'utf8'));
-const envs = status.environments?.edges?.map(e => e.node?.name).filter(Boolean) ?? [];
-if (expectedProjectId && status.id !== expectedProjectId) {
-  console.error(`ERROR: linked Railway project is ${status.name} (${status.id}), expected ${expectedProjectId}.`);
-  console.error('Run: railway project link --project <id> --environment staging --service <staging-service>');
-  process.exit(1);
-}
-if (!envs.includes('staging')) {
-  console.error(`ERROR: linked Railway project ${status.name} has no staging environment.`);
-  process.exit(1);
-}
-NODE
+node scripts/lib/railway-staging-context.js \
+  "$LINKED_STATUS_JSON" \
+  "${OPENCLAW_RAILWAY_PROJECT_ID:-}" \
+  "$SERVICE_NAME" >/dev/null
 rm -f "$LINKED_STATUS_JSON"
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
@@ -170,7 +160,6 @@ railway "${RAILWAY_ARGS[@]}" > "${ARTIFACT_DIR}/railway-up.log" 2>&1
 
 echo "[validate-railway] Waiting for health"
 echo "[validate-railway] Waiting for Railway deployment to become active"
-SERVICE_NAME="${OPENCLAW_RAILWAY_STAGING_SERVICE:-openclaw-railway-staging}"
 STATUS_JSON="${ARTIFACT_DIR}/service-status.json"
 ACTIVE="false"
 for _ in $(seq 1 90); do
@@ -194,6 +183,13 @@ if [[ "$ACTIVE" != "true" ]]; then
   cat "$STATUS_JSON" 2>/dev/null || true
   exit 1
 fi
+
+railway status --json > "${ARTIFACT_DIR}/railway-context.json"
+node scripts/lib/railway-staging-context.js \
+  "${ARTIFACT_DIR}/railway-context.json" \
+  "${OPENCLAW_RAILWAY_PROJECT_ID:-}" \
+  "$SERVICE_NAME" > "${ARTIFACT_DIR}/staging-context.json" \
+  || fail "Railway Serverless was disabled during the staging deploy"
 
 HEALTH_URL="${OPENCLAW_STAGING_HEALTH_URL:-}"
 if [[ -z "$HEALTH_URL" ]]; then
@@ -229,6 +225,7 @@ Gates:
 - Local and staging evidence match the same repository state
 - Railway staging deploy completed
 - Railway deployment became active
+- Railway Serverless remained enabled
 - External health check passed
 - blocker log scan passed
 
